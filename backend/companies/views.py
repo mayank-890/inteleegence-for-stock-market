@@ -1,83 +1,137 @@
 import time
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Case, DecimalField, ExpressionWrapper, F, Q, Value, When
+from django.db.models import Case, DecimalField, ExpressionWrapper, F, OuterRef, Prefetch, Q, Subquery, Value, When
 from django.db.models.functions import Coalesce
-from rest_framework.pagination import PageNumberPagination
+from rest_framework import generics
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from financials.models import FactProfitLoss
-from financials.serializers import ProfitLossSerializer
+from financials.models import FactBalanceSheet, FactCashFlow, FactProfitLoss
 
 from .authentication import HMACAuthentication
 from .models import APIUsageLog, DimCompany, PartnerAccount
-from .serializers import CompanySerializer
+from .pagination import CompanyPagination
+from .serializers import CompanyDetailSerializer, CompanyListSerializer
 from .throttling import PartnerRateThrottle
 
 
-class CompanyDetailView(APIView):
-    def get(self, request, symbol):
-        try:
-            company = DimCompany.objects.get(ticker_symbol=symbol)
-            profit_loss = FactProfitLoss.objects.filter(
-                company_id=company.company_id,
-            ).order_by("-year_id")[:5]
+class CompanyQueryMixin:
+    def company_detail_queryset(self):
+        profit_loss_queryset = FactProfitLoss.objects.select_related("year", "company").order_by(
+            "-year__fiscal_year",
+            "-year_id",
+        )
+        balance_sheet_queryset = FactBalanceSheet.objects.select_related("year", "company").order_by(
+            "-year__fiscal_year",
+            "-year_id",
+        )
+        cash_flow_queryset = FactCashFlow.objects.select_related("year", "company").order_by(
+            "-year__fiscal_year",
+            "-year_id",
+        )
 
-            return Response(
-                {
-                    "status": "success",
-                    "data": {
-                        "company": CompanySerializer(company).data,
-                        "profit_loss": ProfitLossSerializer(profit_loss, many=True).data,
-                    },
-                }
-            )
-        except Exception as exc:
-            return Response(
-                {
-                    "status": "error",
-                    "message": str(exc),
-                }
-            )
+        return DimCompany.objects.select_related("sector").prefetch_related(
+            Prefetch(
+                "profit_loss_records",
+                queryset=profit_loss_queryset,
+                to_attr="prefetched_profit_loss",
+            ),
+            Prefetch(
+                "balance_sheet_records",
+                queryset=balance_sheet_queryset,
+                to_attr="prefetched_balance_sheets",
+            ),
+            Prefetch(
+                "cash_flow_records",
+                queryset=cash_flow_queryset,
+                to_attr="prefetched_cash_flows",
+            ),
+        )
+
+
+class CompanyDetailView(CompanyQueryMixin, APIView):
+    def get(self, request, symbol):
+        company = self.company_detail_queryset().filter(ticker_symbol=symbol).first()
+        if company is None:
+            raise NotFound("Company not found.")
+
+        serializer = CompanyDetailSerializer(company)
+        return Response(serializer.data)
+
+
+class CompanyListView(generics.ListAPIView):
+    serializer_class = CompanyListSerializer
+    pagination_class = CompanyPagination
+
+    def get_queryset(self):
+        queryset = DimCompany.objects.select_related("sector").all()
+
+        sector = self.request.query_params.get("sector")
+        ticker = self.request.query_params.get("ticker")
+        company_name = self.request.query_params.get("company_name")
+        ordering = self.request.query_params.get("ordering", "company_name")
+
+        if sector:
+            queryset = queryset.filter(sector__sector_name__iexact=sector)
+        if ticker:
+            queryset = queryset.filter(ticker_symbol__icontains=ticker)
+        if company_name:
+            queryset = queryset.filter(company_name__icontains=company_name)
+
+        allowed_ordering = {"company_name", "-company_name", "ticker_symbol", "-ticker_symbol"}
+        if ordering not in allowed_ordering:
+            raise ValidationError("Invalid ordering field.")
+
+        return queryset.order_by(ordering, "company_id")
 
 
 class ScreenerQueryMixin:
-    page_size = 10
-    max_results = 50
+    page_size = CompanyPagination.page_size
+    max_results = 100
     allowed_sort_fields = {
         "analysis_records__roe_pct": "analysis_records__roe_pct",
         "analysis_records__de_ratio": "screener_de_ratio",
+        "analysis_records__compounded_sales_growth_pct": "analysis_records__compounded_sales_growth_pct",
         "company_name": "company_name",
     }
     default_sort_by = "analysis_records__roe_pct"
     default_order = "desc"
 
     def build_screener_queryset(self, request):
-        min_roe = self._to_decimal(request.GET.get("min_roe"), "min_roe")
-        max_de = self._to_decimal(request.GET.get("max_de"), "max_de")
-        sector = request.GET.get("sector")
-        sort_by = request.GET.get("sort_by", self.default_sort_by)
-        order = request.GET.get("order", self.default_order)
+        min_roe = self._to_decimal_param(request.query_params.get("min_roe"), "min_roe")
+        max_de = self._to_decimal_param(request.query_params.get("max_de"), "max_de")
+        min_sales_growth = self._to_decimal_param(
+            request.query_params.get("min_sales_growth"),
+            "min_sales_growth",
+        )
+        sector = request.query_params.get("sector")
+        sort_by = request.query_params.get("sort_by", self.default_sort_by)
+        order = request.query_params.get("order", self.default_order)
+
+        if sort_by not in self.allowed_sort_fields:
+            raise ValidationError("Invalid sort_by field.")
+        if order not in {"asc", "desc"}:
+            raise ValidationError("Invalid order value.")
 
         query = Q()
-        annotations = self._debt_to_equity_annotations()
+        annotations = {
+            **self._debt_to_equity_annotations(),
+            **self._latest_profit_loss_annotations(),
+        }
 
         if min_roe is not None:
             query &= Q(analysis_records__roe_pct__gte=min_roe)
-
         if max_de is not None:
             query &= Q(balance_sheet_records__total_equity__gt=0)
             query &= Q(screener_de_ratio__lte=max_de)
-
+        if min_sales_growth is not None:
+            query &= Q(analysis_records__compounded_sales_growth_pct__gte=min_sales_growth)
         if sector:
-            query &= Q(sector__sector_name=sector)
+            query &= Q(sector__sector_name__iexact=sector)
 
-        sort_field = self.allowed_sort_fields.get(
-            sort_by,
-            self.allowed_sort_fields[self.default_sort_by],
-        )
-        ordering = self._ordering(sort_field, order)
+        ordering = self._ordering(self.allowed_sort_fields[sort_by], order)
 
         return (
             DimCompany.objects.select_related("sector")
@@ -89,10 +143,9 @@ class ScreenerQueryMixin:
         )[: self.max_results]
 
     def paginate_companies(self, queryset, request):
-        paginator = PageNumberPagination()
-        paginator.page_size = self.page_size
+        paginator = CompanyPagination()
         page = paginator.paginate_queryset(queryset, request)
-        serializer = CompanySerializer(page, many=True)
+        serializer = CompanyListSerializer(page, many=True)
         return paginator, serializer
 
     @classmethod
@@ -128,20 +181,33 @@ class ScreenerQueryMixin:
             ),
         }
 
-    @classmethod
-    def _ordering(cls, sort_field, order):
+    @staticmethod
+    def _latest_profit_loss_annotations():
+        latest_profit_loss = FactProfitLoss.objects.filter(company=OuterRef("pk")).order_by("-year__fiscal_year")
+        return {
+            "latest_year": Subquery(latest_profit_loss.values("year__fiscal_year")[:1]),
+            "latest_revenue": Subquery(latest_profit_loss.values("revenue")[:1]),
+            "latest_profit_after_tax": Subquery(latest_profit_loss.values("profit_after_tax")[:1]),
+            "latest_basic_eps": Subquery(latest_profit_loss.values("basic_eps")[:1]),
+        }
+
+    @staticmethod
+    def _ordering(sort_field, order):
         if order == "desc":
             return f"-{sort_field}"
         return sort_field
 
-    def _to_decimal(self, value, field_name):
-        try:
-            return Decimal(value) if value not in (None, "") else None
-        except (InvalidOperation, TypeError, ValueError):
+    @staticmethod
+    def _to_decimal_param(value, field_name):
+        if value in (None, ""):
             return None
+        try:
+            return Decimal(value)
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValidationError(f"Invalid value for {field_name}.") from exc
 
 
-class ScreenerView(ScreenerQueryMixin, APIView):
+class ScreenerView(APIView, ScreenerQueryMixin):
     def get(self, request):
         queryset = self.build_screener_queryset(request)
         paginator, serializer = self.paginate_companies(queryset, request)
@@ -193,7 +259,7 @@ class PartnerLoggingMixin:
             return None
 
 
-class PartnerScreenerView(PartnerLoggingMixin, ScreenerQueryMixin, APIView):
+class PartnerScreenerView(PartnerLoggingMixin, APIView, ScreenerQueryMixin):
     authentication_classes = [HMACAuthentication]
     throttle_classes = [PartnerRateThrottle]
 

@@ -39,16 +39,23 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'rest_framework.authtoken',
+    'corsheaders',
+    'django_filters',
+    'analytics.apps.AnalyticsConfig',
+    'monetization.apps.MonetizationConfig',
     'companies',
     'financials',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'monetization.middleware.APIUsageMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -81,7 +88,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'nifty100',
         'USER': 'postgres',
-        'PASSWORD': 'PASS@word890',
+        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
         'HOST': 'localhost',
         'PORT': '5432',
     }
@@ -131,3 +138,33 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 PARTNER_HMAC_ENCRYPTION_KEY = os.getenv("PARTNER_HMAC_ENCRYPTION_KEY", "")
 
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "monetization.authentication.APIKeyAuthentication",
+        "rest_framework.authentication.TokenAuthentication",
+    ],
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
+    "EXCEPTION_HANDLER": "backend.exceptions.custom_exception_handler",
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "monetization-rate-limits",
+    }
+}
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+# At the bottom of settings.py
+LOGIN_REDIRECT_URL = '/api/v1/'

@@ -8,7 +8,7 @@ from cryptography.fernet import Fernet
 from django.core.cache import cache
 from django.db.models import Q
 from django.test import SimpleTestCase, override_settings
-from rest_framework.test import APIRequestFactory
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from companies.authentication import HMACAuthentication
 from companies.models import PartnerAccount
@@ -107,6 +107,7 @@ class FakeCompanyManager:
 
 
 TEST_FERNET_KEY = Fernet.generate_key().decode("utf-8")
+AUTHENTICATED_USER = SimpleNamespace(is_authenticated=True)
 
 
 @override_settings(
@@ -142,7 +143,7 @@ class ScreenerViewTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["results"]["status"], "success")
-        self.assertIn("sector__sector_name", self._filter_lookups(queryset))
+        self.assertIn("sector__sector_name__iexact", self._filter_lookups(queryset))
         self.assertTrue(queryset.distinct_called)
 
     def test_screener_filters_min_roe_max_de_and_sector(self):
@@ -160,7 +161,7 @@ class ScreenerViewTests(SimpleTestCase):
         self.assertIn("analysis_records__roe_pct__gte", lookups)
         self.assertIn("balance_sheet_records__total_equity__gt", lookups)
         self.assertIn("screener_de_ratio__lte", lookups)
-        self.assertIn("sector__sector_name", lookups)
+        self.assertIn("sector__sector_name__iexact", lookups)
         self.assertTrue(queryset.distinct_called)
 
     def test_screener_without_filters_returns_paginated_results_without_error(self):
@@ -232,11 +233,12 @@ class ScreenerViewTests(SimpleTestCase):
     def _get_public_response(self, params):
         manager = FakeCompanyManager()
         request = self.factory.get("/api/v1/screener/", params, HTTP_HOST="localhost")
+        force_authenticate(request, user=AUTHENTICATED_USER)
         fake_company = SimpleNamespace(objects=manager)
 
         with (
             patch("companies.views.DimCompany", fake_company),
-            patch("companies.views.CompanySerializer", FakeCompanySerializer),
+            patch("companies.views.CompanyListSerializer", FakeCompanySerializer),
         ):
             response = ScreenerView.as_view()(request)
 
@@ -251,7 +253,7 @@ class ScreenerViewTests(SimpleTestCase):
 
         with (
             patch("companies.views.DimCompany", fake_company),
-            patch("companies.views.CompanySerializer", FakeCompanySerializer),
+            patch("companies.views.CompanyListSerializer", FakeCompanySerializer),
             patch.object(PartnerAccount.objects, "get", return_value=partner),
             patch.object(PartnerAccount.objects, "filter", return_value=FakeFilterResult(partner)),
             patch("companies.views.APIUsageLog.objects.create", usage_log_create),

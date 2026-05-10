@@ -1,19 +1,94 @@
+# ========================
+# Python / Django
+# ========================
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-db.sqlite3
-.env
-venv/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.Python
 env/
-*.log
-.idea/
-.vscode/
-.DS_Store
-
-.env
-__pycache__/
-*.exe
-*.log
-node_modules/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+*.mo
+*.pot
 db.sqlite3
+media/
+staticfiles/
+static_root/
+
+# ========================
+# Environment & Secrets
+# ========================
+.env
+.env.local
+.env.*.local
+*.env
+secrets.py
+
+# ========================
+# Next.js / Node
+# ========================
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+
+# ========================
+# Power BI
+# ========================
+*.pbix
+*.pbit
+
+# ========================
+# Data files (too large for git)
+# ========================
+data/n100/*.xlsx
+*.csv
+*.xls
+
+# ========================
+# OS files
+# ========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ========================
+# IDE / Editor
+# ========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
