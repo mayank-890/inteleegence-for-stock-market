@@ -1,94 +1,99 @@
-# ========================
-# Python / Django
-# ========================
+# =========================
+# Python
+# =========================
+venv/
+env/
+ENV/
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 *.pyd
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-.Python
-env/
-venv/
-.venv/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-htmlcov/
-.pytest_cache/
-*.mo
-*.pot
+
+# Environment variables
+.env
+.env.*
+
+# =========================
+# Django
+# =========================
 db.sqlite3
 media/
 staticfiles/
-static_root/
 
-# ========================
-# Environment & Secrets
-# ========================
-.env
-.env.local
-.env.*.local
-*.env
-secrets.py
-
-# ========================
-# Next.js / Node
-# ========================
+# =========================
+# Node / Next.js
+# =========================
 node_modules/
 .next/
-out/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
-.vercel
-*.tsbuildinfo
-next-env.d.ts
 
-# ========================
-# Power BI
-# ========================
-*.pbix
-*.pbit
+# =========================
+# Build / Distribution
+# =========================
+dist/
+build/
 
-# ========================
-# Data files (too large for git)
-# ========================
-data/n100/*.xlsx
-*.csv
-*.xls
+# =========================
+# Logs
+# =========================
+*.log
 
-# ========================
-# OS files
-# ========================
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# ========================
-# IDE / Editor
-# ========================
+# =========================
+# VS Code / IDE
+# =========================
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-.project
-.classpath
 
-# ========================
-# Logs
-# ========================
-*.log
-logs/
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Testing / Cache
+# =========================
+.pytest_cache/
+.cache/
+coverage/
+htmlcov/
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Power BI Temp Files
+# =========================
+*.tmp
+
+# =========================
+# Data Folders (optional)
+# Uncomment if datasets become huge
+# =========================
+# data/raw/
+# data/processed/
+
+# =========================
+# Docker
+# =========================
+*.pid
+
+# =========================
+# Celery
+# =========================
+celerybeat-schedule
+
+# =========================
+# Local Runtime Files
+# =========================
+*.sqlite3
+*.db
+
+# =========================
+# TypeScript
+# =========================
+*.tsbuildinfo

@@ -1,6 +1,10 @@
 from rest_framework import serializers
 
-from financials.serializers import BalanceSheetSerializer, CashFlowSerializer, ProfitLossSerializer
+from financials.serializers import (
+    FactBalanceSheetSerializer,
+    FactCashFlowSerializer,
+    FactProfitLossSerializer,
+)
 
 from .models import DimCompany
 
@@ -47,13 +51,15 @@ class CompanyListSerializer(serializers.ModelSerializer):
 class CompanyDetailSerializer(serializers.ModelSerializer):
     sector_name = serializers.CharField(source="sector.sector_name", read_only=True)
     nse_symbol = serializers.CharField(read_only=True)
-    profit_loss = ProfitLossSerializer(source="prefetched_profit_loss", many=True, read_only=True)
-    balance_sheet = BalanceSheetSerializer(
-        source="prefetched_balance_sheets",
-        many=True,
-        read_only=True,
+    profit_loss = FactProfitLossSerializer(
+        source="prefetched_profit_loss", many=True, read_only=True
     )
-    cash_flow = CashFlowSerializer(source="prefetched_cash_flows", many=True, read_only=True)
+    balance_sheet = FactBalanceSheetSerializer(
+        source="prefetched_balance_sheets", many=True, read_only=True
+    )
+    cash_flow = FactCashFlowSerializer(
+        source="prefetched_cash_flows", many=True, read_only=True
+    )
 
     class Meta:
         model = DimCompany

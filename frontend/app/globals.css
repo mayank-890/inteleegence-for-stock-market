@@ -1,16 +1,40 @@
 :root {
   color-scheme: dark;
+
+  /* ── Core palette ─────────────────────────────── */
+  --bg-base: #05010F;
+  --bg-secondary: #0B0618;
+  --bg-card: rgba(255,255,255,0.04);
+  --bg-card-hover: rgba(255,255,255,0.07);
+  --purple: #7C3AED;
+  --violet: #A855F7;
+  --purple-light: #C084FC;
+  --blue-accent: #3B82F6;
+  --success: #10B981;
+  --danger: #EF4444;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --border: rgba(124,58,237,0.2);
+  --border-hover: rgba(168,85,247,0.4);
+  --font-mono: 'Roboto Mono', monospace;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 html,
 body {
   margin: 0;
+  padding: 0;
   min-height: 100%;
-  background: #0a1628;
+  background: var(--bg-base);
+  color: var(--text-primary);
 }
 
-body {
-  color: #ffffff;
+* {
+  box-sizing: border-box;
 }
 
 a {
@@ -18,17 +42,66 @@ a {
   text-decoration: none;
 }
 
-* {
-  box-sizing: border-box;
+::selection {
+  background: rgba(124,58,237,0.3);
 }
 
+/* ── Scrollbar ────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-base);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(244, 185, 66, 0.35);
-  border-radius: 999px;
+  background: rgba(124,58,237,0.3);
+  border-radius: 3px;
 }
 
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(124,58,237,0.5);
+}
+
+/* ── Ticker animation ─────────────────────────── */
+@keyframes ticker-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* ── Gradient text utility ────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #A855F7, #3B82F6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-purple {
+  background: linear-gradient(135deg, #7C3AED, #A855F7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Section label ────────────────────────────── */
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--purple);
+}
+
+/* ── Reduced motion ───────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

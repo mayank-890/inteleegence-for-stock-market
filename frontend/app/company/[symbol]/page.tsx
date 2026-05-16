@@ -1,342 +1,648 @@
 "use client";
 
-import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import {
   Alert,
   Box,
-  Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
-  Container,
   Grid,
+  Skeleton,
   Stack,
   Tab,
-  Tabs,
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
-  Typography
+  Tabs,
+  Typography,
 } from "@mui/material";
-import NextLink from "next/link";
+import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import ShowChartRoundedIcon from "@mui/icons-material/ShowChartRounded";
+import ScoreboardRoundedIcon from "@mui/icons-material/ScoreboardRounded";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-
-import CompanyChart from "@/components/CompanyChart";
-import MLInsightCard from "@/components/MLInsightCard";
-import ProtectedRoute from "@/components/ProtectedRoute";
-import TopBar from "@/components/TopBar";
+import { useCallback, useEffect, useState } from "react";
 import {
-  AnomaliesResponse,
-  CompanyDetail,
-  EPSGrowthResponse,
-  ProfitMarginResponse,
-  RevenueTrendResponse,
-  ScreenerScoreResponse,
-  fetchAnomalies,
-  fetchCompanyDetail,
-  fetchEpsGrowth,
-  fetchProfitMargin,
-  fetchRevenueTrend,
-  fetchScreenerScore
-} from "@/lib/api";
-import { clearSession, getStoredUser } from "@/lib/auth";
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
-const formatValue = (value: number | null | undefined) =>
-  value == null || Number.isNaN(value) ? "N/A" : value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+import ProtectedRoute from "@/components/ProtectedRoute";
+import GlassCard from "@/components/GlassCard";
+import {
+  ProfitLossRecord,
+  BalanceSheetRecord,
+  CashFlowRecord,
+  RevenueTrendResponse,
+  ProfitMarginResponse,
+  EPSGrowthResponse,
+  AnomaliesResponse,
+  ScreenerScoreResponse,
+  fetchProfitLoss,
+  fetchBalanceSheet,
+  fetchCashFlow,
+  fetchRevenueTrend,
+  fetchProfitMargin,
+  fetchEpsGrowth,
+  fetchAnomalies,
+  fetchScreenerScore,
+} from "@/lib/api";
+
+/* ── Helpers ────────────────────────────────────────────────── */
+
+const monoSx = { fontFamily: "var(--font-mono)", fontWeight: 700 };
+
+const formatNum = (n: number | null | undefined) => {
+  if (n == null) return "—";
+  if (Math.abs(n) >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
+  if (Math.abs(n) >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;
+  return n.toLocaleString("en-IN");
+};
+
+const directionChip = (dir: string) => {
+  if (dir === "growing" || dir === "improving")
+    return <Chip label={dir} size="small" sx={{ bgcolor: "rgba(34,197,94,0.15)", color: "#22C55E", fontWeight: 600 }} />;
+  if (dir === "declining" || dir === "deteriorating")
+    return <Chip label={dir} size="small" sx={{ bgcolor: "rgba(239,68,68,0.15)", color: "#EF4444", fontWeight: 600 }} />;
+  return <Chip label={dir} size="small" sx={{ bgcolor: "rgba(148,163,184,0.15)", color: "#94A3B8", fontWeight: 600 }} />;
+};
+
+const scoreColor = (s: number) => {
+  if (s >= 71) return "#22C55E";
+  if (s >= 41) return "#F4B942";
+  return "#EF4444";
+};
+
+const tableCellSx = {
+  borderBottom: "1px solid rgba(124,58,237,0.15)",
+  color: "#F8FAFC",
+};
+
+/* ── Component ──────────────────────────────────────────────── */
 
 export default function CompanyDetailPage() {
-  const params = useParams<{ symbol: string }>();
-  const symbol = Array.isArray(params.symbol) ? params.symbol[0] : params.symbol;
-  const user = getStoredUser();
+  const { symbol } = useParams<{ symbol: string }>();
 
   const [tab, setTab] = useState(0);
-  const [detail, setDetail] = useState<CompanyDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(true);
-  const [detailError, setDetailError] = useState<string | null>(null);
 
+  // Financials
+  const [plData, setPlData] = useState<ProfitLossRecord[]>([]);
+  const [plLoading, setPlLoading] = useState(true);
+  const [plError, setPlError] = useState<string | null>(null);
+
+  // Balance Sheet
+  const [bsData, setBsData] = useState<BalanceSheetRecord[]>([]);
+  const [bsLoading, setBsLoading] = useState(false);
+  const [bsError, setBsError] = useState<string | null>(null);
+
+  // Cash Flow
+  const [cfData, setCfData] = useState<CashFlowRecord[]>([]);
+  const [cfLoading, setCfLoading] = useState(false);
+  const [cfError, setCfError] = useState<string | null>(null);
+
+  // ML insights
   const [revenueTrend, setRevenueTrend] = useState<RevenueTrendResponse | null>(null);
   const [profitMargin, setProfitMargin] = useState<ProfitMarginResponse | null>(null);
   const [epsGrowth, setEpsGrowth] = useState<EPSGrowthResponse | null>(null);
   const [anomalies, setAnomalies] = useState<AnomaliesResponse | null>(null);
   const [screenerScore, setScreenerScore] = useState<ScreenerScoreResponse | null>(null);
-  const [insightLoading, setInsightLoading] = useState(true);
-  const [insightError, setInsightError] = useState<string | null>(null);
+  const [mlLoading, setMlLoading] = useState(false);
+  const [mlError, setMlError] = useState<string | null>(null);
 
+  // Load P&L on mount
   useEffect(() => {
-    if (!symbol) {
-      return;
-    }
-
-    const loadCompany = async () => {
-      try {
-        setDetailLoading(true);
-        setDetailError(null);
-        setDetail(await fetchCompanyDetail(symbol));
-      } catch (err: any) {
-        setDetailError(err?.response?.data?.message || "Unable to load company detail.");
-      } finally {
-        setDetailLoading(false);
-      }
-    };
-
-    const loadInsights = async () => {
-      try {
-        setInsightLoading(true);
-        setInsightError(null);
-        const [revenue, margin, eps, anomalyData, screener] = await Promise.all([
-          fetchRevenueTrend(symbol),
-          fetchProfitMargin(symbol),
-          fetchEpsGrowth(symbol),
-          fetchAnomalies(symbol),
-          fetchScreenerScore(symbol)
-        ]);
-        setRevenueTrend(revenue);
-        setProfitMargin(margin);
-        setEpsGrowth(eps);
-        setAnomalies(anomalyData);
-        setScreenerScore(screener);
-      } catch (err: any) {
-        setInsightError(err?.response?.data?.message || "Analytics insights could not be loaded.");
-      } finally {
-        setInsightLoading(false);
-      }
-    };
-
-    loadCompany();
-    loadInsights();
+    if (!symbol) return;
+    setPlLoading(true);
+    setPlError(null);
+    fetchProfitLoss({ company: symbol })
+      .then((r) => setPlData(r.items.sort((a, b) => b.year - a.year)))
+      .catch(() => setPlError("Failed to load financials."))
+      .finally(() => setPlLoading(false));
   }, [symbol]);
 
-  const cashFlowChart = useMemo(
-    () =>
-      detail?.cash_flow
-        ?.slice()
-        .sort((left, right) => left.year - right.year)
-        .map((entry) => ({
-          year: entry.year,
-          operating: entry.cash_flow_from_operating_activities,
-          investing: entry.cash_flow_from_investing_activities,
-          financing: entry.cash_flow_from_financing_activities
-        })) ?? [],
-    [detail]
-  );
+  // Load tab data lazily
+  const loadMl = useCallback(() => {
+    if (!symbol || mlLoading || revenueTrend) return;
+    setMlLoading(true);
+    setMlError(null);
+    Promise.all([
+      fetchRevenueTrend(symbol),
+      fetchProfitMargin(symbol),
+      fetchEpsGrowth(symbol),
+      fetchAnomalies(symbol),
+      fetchScreenerScore(symbol),
+    ])
+      .then(([rt, pm, eg, an, ss]) => {
+        setRevenueTrend(rt);
+        setProfitMargin(pm);
+        setEpsGrowth(eg);
+        setAnomalies(an);
+        setScreenerScore(ss);
+      })
+      .catch(() => setMlError("Failed to load ML insights."))
+      .finally(() => setMlLoading(false));
+  }, [symbol, mlLoading, revenueTrend]);
+
+  const loadBs = useCallback(() => {
+    if (!symbol || bsLoading || bsData.length > 0) return;
+    setBsLoading(true);
+    setBsError(null);
+    fetchBalanceSheet({ company: symbol })
+      .then((r) => setBsData(r.items.sort((a, b) => b.year - a.year)))
+      .catch(() => setBsError("Failed to load balance sheet."))
+      .finally(() => setBsLoading(false));
+  }, [symbol, bsLoading, bsData.length]);
+
+  const loadCf = useCallback(() => {
+    if (!symbol || cfLoading || cfData.length > 0) return;
+    setCfLoading(true);
+    setCfError(null);
+    fetchCashFlow({ company: symbol })
+      .then((r) => setCfData(r.items.sort((a, b) => a.year - b.year)))
+      .catch(() => setCfError("Failed to load cash flow."))
+      .finally(() => setCfLoading(false));
+  }, [symbol, cfLoading, cfData.length]);
+
+  useEffect(() => {
+    if (tab === 1) loadMl();
+    if (tab === 2) loadBs();
+    if (tab === 3) loadCf();
+  }, [tab, loadMl, loadBs, loadCf]);
+
+  // Also load screener score for the header gauge
+  useEffect(() => {
+    if (!symbol) return;
+    fetchScreenerScore(symbol)
+      .then(setScreenerScore)
+      .catch(() => {});
+  }, [symbol]);
+
+  const companyName = plData[0]?.company_name || symbol;
 
   return (
     <ProtectedRoute>
-      <TopBar
-        title={detail?.company.name || `Company • ${symbol}`}
-        subtitle="Detailed financial history with the machine learning layer attached."
-        userLabel={user?.email}
-        onLogout={() => {
-          clearSession();
-          window.location.href = "/login";
+      <Box
+        sx={{
+          maxWidth: 1200,
+          mx: "auto",
+          p: { xs: 2, md: 4 },
+          minHeight: "100vh",
         }}
-        actions={
-          <Button component={NextLink} href="/dashboard" variant="outlined" startIcon={<ArrowBackRoundedIcon />}>
-            Back to dashboard
-          </Button>
-        }
-      />
-
-      <Container maxWidth="xl" sx={{ pb: 6 }}>
-        {detailLoading ? (
-          <Alert severity="info">Loading company workspace...</Alert>
-        ) : detailError ? (
-          <Alert severity="error">{detailError}</Alert>
-        ) : detail ? (
-          <Stack spacing={3}>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="h3" sx={{ mb: 1 }}>
-                  {detail.company.name}
-                </Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap">
-                  <Chip label={`Ticker: ${detail.company.ticker}`} />
-                  <Chip label={`Sector: ${detail.company.sector}`} />
-                  {detail.company.nse_symbol ? <Chip label={`NSE: ${detail.company.nse_symbol}`} /> : null}
-                </Stack>
-              </Box>
-            </Stack>
-
-            <Tabs value={tab} onChange={(_, next) => setTab(next)} variant="scrollable">
-              <Tab label="Financials" />
-              <Tab label="ML Insights" />
-              <Tab label="Cash Flow" />
-            </Tabs>
-
-            {tab === 0 ? (
-              <Grid container spacing={3}>
-                <Grid item xs={12} lg={7}>
-                  <Box sx={{ overflowX: "auto", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 2 }}>
-                    <Typography variant="h6" sx={{ p: 2 }}>
-                      Profit &amp; Loss
-                    </Typography>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Year</TableCell>
-                          <TableCell align="right">Revenue</TableCell>
-                          <TableCell align="right">Total income</TableCell>
-                          <TableCell align="right">PAT</TableCell>
-                          <TableCell align="right">EPS</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {detail.profit_loss.map((row) => (
-                          <TableRow key={row.year}>
-                            <TableCell>{row.year}</TableCell>
-                            <TableCell align="right">{formatValue(row.revenue)}</TableCell>
-                            <TableCell align="right">{formatValue(row.total_income)}</TableCell>
-                            <TableCell align="right">{formatValue(row.profit_after_tax)}</TableCell>
-                            <TableCell align="right">{formatValue(row.eps)}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} lg={5}>
-                  <Box sx={{ overflowX: "auto", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 2 }}>
-                    <Typography variant="h6" sx={{ p: 2 }}>
-                      Balance Sheet
-                    </Typography>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Year</TableCell>
-                          <TableCell align="right">Equity</TableCell>
-                          <TableCell align="right">Assets</TableCell>
-                          <TableCell align="right">Liabilities</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {detail.balance_sheet.map((row) => (
-                          <TableRow key={row.year}>
-                            <TableCell>{row.year}</TableCell>
-                            <TableCell align="right">{formatValue(row.total_equity)}</TableCell>
-                            <TableCell align="right">{formatValue(row.total_assets)}</TableCell>
-                            <TableCell align="right">{formatValue(row.total_liabilities)}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </Box>
-                </Grid>
-              </Grid>
-            ) : null}
-
-            {tab === 1 ? (
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={6}>
-                  <MLInsightCard title="Revenue trend" loading={insightLoading} error={insightError}>
-                    <Stack spacing={1.5}>
-                      <Typography variant="h4" sx={{ textTransform: "capitalize" }}>
-                        {revenueTrend?.result.direction}
-                      </Typography>
-                      <Typography color="text.secondary">
-                        Slope: {formatValue(revenueTrend?.result.slope)} • R²: {formatValue(revenueTrend?.result.r2_score)}
-                      </Typography>
-                    </Stack>
-                  </MLInsightCard>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <MLInsightCard title="Profit margin" loading={insightLoading} error={insightError}>
-                    <Stack spacing={1.5}>
-                      <Typography variant="h4" sx={{ textTransform: "capitalize" }}>
-                        {profitMargin?.result.overall_trend}
-                      </Typography>
-                      <Typography color="text.secondary">
-                        Average margin: {formatValue(profitMargin?.result.average_margin_pct)}%
-                      </Typography>
-                    </Stack>
-                  </MLInsightCard>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <MLInsightCard title="EPS growth" loading={insightLoading} error={insightError}>
-                    <Stack spacing={1.5}>
-                      <Typography color="text.secondary">
-                        Best year: {epsGrowth?.result.best_year.year} ({formatValue(epsGrowth?.result.best_year.growth_pct)}%)
-                      </Typography>
-                      <Typography color="text.secondary">
-                        Worst year: {epsGrowth?.result.worst_year.year} ({formatValue(epsGrowth?.result.worst_year.growth_pct)}%)
-                      </Typography>
-                    </Stack>
-                  </MLInsightCard>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <MLInsightCard title="Anomalies" loading={insightLoading} error={insightError}>
-                    <Stack spacing={1.5}>
-                      <Typography variant="h4">{anomalies?.result.anomaly_count ?? 0}</Typography>
-                      <Typography color="text.secondary">
-                        Revenue: {anomalies?.result.metrics.revenue.length ?? 0} • PAT: {anomalies?.result.metrics.profit_after_tax.length ?? 0} • EPS: {anomalies?.result.metrics.basic_eps.length ?? 0}
-                      </Typography>
-                    </Stack>
-                  </MLInsightCard>
-                </Grid>
-                <Grid item xs={12}>
-                  <MLInsightCard title="Screener score" loading={insightLoading} error={insightError}>
-                    <Stack direction={{ xs: "column", md: "row" }} spacing={3} alignItems="center">
-                      <Box sx={{ position: "relative", display: "inline-flex" }}>
-                        <CircularProgress
-                          variant="determinate"
-                          value={screenerScore?.result.score ?? 0}
-                          size={120}
-                          thickness={5}
-                          color="primary"
-                        />
-                        <Box
-                          sx={{
-                            top: 0,
-                            left: 0,
-                            bottom: 0,
-                            right: 0,
-                            position: "absolute",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center"
-                          }}
-                        >
-                          <Typography variant="h5">{formatValue(screenerScore?.result.score)}</Typography>
-                        </Box>
-                      </Box>
-                      <Stack spacing={1}>
-                        <Typography color="text.secondary">
-                          Revenue trend: {formatValue(screenerScore?.result.components.revenue_growth_trend)}
-                        </Typography>
-                        <Typography color="text.secondary">
-                          Profit margin: {formatValue(screenerScore?.result.components.profit_margin_average)}
-                        </Typography>
-                        <Typography color="text.secondary">
-                          EPS consistency: {formatValue(screenerScore?.result.components.eps_consistency)}
-                        </Typography>
-                        <Typography color="text.secondary">
-                          Anomaly absence: {formatValue(screenerScore?.result.components.absence_of_anomalies)}
-                        </Typography>
-                      </Stack>
-                    </Stack>
-                  </MLInsightCard>
-                </Grid>
-              </Grid>
-            ) : null}
-
-            {tab === 2 ? (
-              <CompanyChart
-                title="Operating vs investing vs financing cash flow"
-                data={cashFlowChart}
-                xKey="year"
-                type="bar"
-                series={[
-                  { key: "operating", label: "Operating", color: "#7BE495" },
-                  { key: "investing", label: "Investing", color: "#F4B942" },
-                  { key: "financing", label: "Financing", color: "#3AAED8" }
-                ]}
+      >
+        {/* ── Company Header ────────────────────────────────── */}
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          alignItems="flex-start"
+          sx={{ mb: 4 }}
+        >
+          <Stack spacing={1}>
+            <Typography variant="h4" sx={{ fontWeight: 700 }}>
+              {companyName}
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              <Chip
+                label={symbol}
+                size="small"
+                sx={{
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 600,
+                  bgcolor: "rgba(124,58,237,0.15)",
+                  color: "#A855F7",
+                }}
               />
-            ) : null}
+              <Chip
+                label="Nifty 100"
+                size="small"
+                sx={{
+                  bgcolor: "rgba(244,185,66,0.15)",
+                  color: "#F4B942",
+                  fontWeight: 600,
+                }}
+              />
+            </Stack>
           </Stack>
-        ) : null}
-      </Container>
+
+          {/* Screener Score Gauge */}
+          {screenerScore && (
+            <Box sx={{ position: "relative", display: "inline-flex" }}>
+              <CircularProgress
+                variant="determinate"
+                value={screenerScore.result.score}
+                size={72}
+                thickness={5}
+                sx={{
+                  color: scoreColor(screenerScore.result.score),
+                  "& .MuiCircularProgress-circle": { strokeLinecap: "round" },
+                }}
+              />
+              <Box
+                sx={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 700,
+                    fontSize: 18,
+                    color: scoreColor(screenerScore.result.score),
+                  }}
+                >
+                  {screenerScore.result.score}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+        </Stack>
+
+        {/* ── Tabs ──────────────────────────────────────────── */}
+        <Tabs
+          value={tab}
+          onChange={(_, v) => setTab(v)}
+          sx={{
+            mb: 3,
+            "& .MuiTab-root": { color: "#94A3B8", textTransform: "none", fontWeight: 600 },
+            "& .Mui-selected": { color: "#A855F7" },
+            "& .MuiTabs-indicator": { backgroundColor: "#7C3AED" },
+            borderBottom: "1px solid rgba(124,58,237,0.15)",
+          }}
+        >
+          <Tab label="Financials" />
+          <Tab label="ML Insights" />
+          <Tab label="Balance Sheet" />
+          <Tab label="Cash Flow" />
+        </Tabs>
+
+        {/* ── Tab 0: Financials ─────────────────────────────── */}
+        {tab === 0 && (
+          <Card>
+            <CardContent sx={{ p: 0 }}>
+              {plLoading ? (
+                <Stack spacing={1} sx={{ p: 3 }}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} variant="rounded" height={40} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+                  ))}
+                </Stack>
+              ) : plError ? (
+                <Alert severity="error" sx={{ m: 2 }}>{plError}</Alert>
+              ) : (
+                <TableContainer>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        {["Year", "Revenue", "Total Income", "Profit After Tax", "Basic EPS"].map((h) => (
+                          <TableCell key={h} sx={{ ...tableCellSx, color: "#94A3B8", fontWeight: 600 }}>
+                            {h}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {plData.map((row) => (
+                        <TableRow key={row.year} sx={{ "&:hover": { bgcolor: "rgba(124,58,237,0.06)" } }}>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{row.year}</TableCell>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{formatNum(row.revenue)}</TableCell>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{formatNum(row.total_income)}</TableCell>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{formatNum(row.profit_after_tax)}</TableCell>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{row.basic_eps != null ? row.basic_eps.toFixed(2) : "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── Tab 1: ML Insights ────────────────────────────── */}
+        {tab === 1 && (
+          <>
+            {mlError && <Alert severity="error" sx={{ mb: 2 }}>{mlError}</Alert>}
+            <Grid container spacing={2.5}>
+              {/* Revenue Trend */}
+              <Grid item xs={12} md={6}>
+                <Card sx={{ height: "100%" }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <TrendingUpRoundedIcon sx={{ color: "#7C3AED" }} />
+                        <Typography variant="h6">Revenue Trend</Typography>
+                      </Stack>
+                      {mlLoading ? (
+                        <Skeleton variant="rounded" height={120} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+                      ) : revenueTrend ? (
+                        <Stack spacing={1.5}>
+                          {directionChip(revenueTrend.result.direction)}
+                          <Grid container spacing={2}>
+                            <Grid item xs={4}>
+                              <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>Slope</Typography>
+                              <Typography sx={monoSx}>{revenueTrend.result.slope.toFixed(4)}</Typography>
+                            </Grid>
+                            <Grid item xs={4}>
+                              <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>R² Score</Typography>
+                              <Typography sx={monoSx}>{revenueTrend.result.r2_score.toFixed(4)}</Typography>
+                            </Grid>
+                            <Grid item xs={4}>
+                              <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>Years</Typography>
+                              <Typography sx={monoSx}>{revenueTrend.result.years_analyzed}</Typography>
+                            </Grid>
+                          </Grid>
+                        </Stack>
+                      ) : null}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Profit Margin */}
+              <Grid item xs={12} md={6}>
+                <Card sx={{ height: "100%" }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <ShowChartRoundedIcon sx={{ color: "#7C3AED" }} />
+                        <Typography variant="h6">Profit Margin</Typography>
+                      </Stack>
+                      {mlLoading ? (
+                        <Skeleton variant="rounded" height={120} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+                      ) : profitMargin ? (
+                        <Stack spacing={1.5}>
+                          <Typography sx={{ ...monoSx, fontSize: 36, color: "#F8FAFC" }}>
+                            {profitMargin.result.average_margin_pct != null
+                              ? `${profitMargin.result.average_margin_pct.toFixed(2)}%`
+                              : "—"}
+                          </Typography>
+                          {directionChip(profitMargin.result.overall_trend)}
+                        </Stack>
+                      ) : null}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* EPS Growth */}
+              <Grid item xs={12} md={6}>
+                <Card sx={{ height: "100%" }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <TrendingUpRoundedIcon sx={{ color: "#22C55E" }} />
+                        <Typography variant="h6">EPS Growth</Typography>
+                      </Stack>
+                      {mlLoading ? (
+                        <Skeleton variant="rounded" height={120} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+                      ) : epsGrowth ? (
+                        <Grid container spacing={2}>
+                          <Grid item xs={6}>
+                            <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>Best Year</Typography>
+                            <Typography sx={{ ...monoSx, color: "#22C55E", fontSize: 20 }}>
+                              {epsGrowth.result.best_year.year}
+                            </Typography>
+                            <Typography sx={{ ...monoSx, color: "#22C55E", fontSize: 14 }}>
+                              {epsGrowth.result.best_year.growth_pct != null
+                                ? `${epsGrowth.result.best_year.growth_pct.toFixed(1)}%`
+                                : "—"}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>Worst Year</Typography>
+                            <Typography sx={{ ...monoSx, color: "#EF4444", fontSize: 20 }}>
+                              {epsGrowth.result.worst_year.year}
+                            </Typography>
+                            <Typography sx={{ ...monoSx, color: "#EF4444", fontSize: 14 }}>
+                              {epsGrowth.result.worst_year.growth_pct != null
+                                ? `${epsGrowth.result.worst_year.growth_pct.toFixed(1)}%`
+                                : "—"}
+                            </Typography>
+                          </Grid>
+                        </Grid>
+                      ) : null}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Anomalies */}
+              <Grid item xs={12} md={6}>
+                <Card sx={{ height: "100%" }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <WarningAmberRoundedIcon sx={{ color: "#F4B942" }} />
+                        <Typography variant="h6">Anomalies</Typography>
+                      </Stack>
+                      {mlLoading ? (
+                        <Skeleton variant="rounded" height={120} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+                      ) : anomalies ? (
+                        <Stack spacing={1.5}>
+                          <Typography
+                            sx={{
+                              ...monoSx,
+                              fontSize: 36,
+                              color: anomalies.result.anomaly_count > 0 ? "#EF4444" : "#22C55E",
+                            }}
+                          >
+                            {anomalies.result.anomaly_count}
+                          </Typography>
+                          <Typography sx={{ color: "#94A3B8", fontSize: 13 }}>
+                            anomalous years detected
+                          </Typography>
+                          {anomalies.result.metrics.revenue.length > 0 && (
+                            <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                              {anomalies.result.metrics.revenue.map((a) => (
+                                <Chip
+                                  key={a.year}
+                                  label={`${a.year} (z=${a.z_score?.toFixed(1)})`}
+                                  size="small"
+                                  sx={{
+                                    bgcolor: "rgba(239,68,68,0.12)",
+                                    color: "#EF4444",
+                                    fontFamily: "var(--font-mono)",
+                                    fontSize: 11,
+                                    mb: 0.5,
+                                  }}
+                                />
+                              ))}
+                            </Stack>
+                          )}
+                        </Stack>
+                      ) : null}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Screener Score */}
+              <Grid item xs={12} md={6}>
+                <Card sx={{ height: "100%" }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2} alignItems="center">
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%" }}>
+                        <ScoreboardRoundedIcon sx={{ color: "#7C3AED" }} />
+                        <Typography variant="h6">Screener Score</Typography>
+                      </Stack>
+                      {mlLoading ? (
+                        <Skeleton variant="circular" width={100} height={100} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+                      ) : screenerScore ? (
+                        <>
+                          <Box sx={{ position: "relative", display: "inline-flex" }}>
+                            <CircularProgress
+                              variant="determinate"
+                              value={screenerScore.result.score}
+                              size={100}
+                              thickness={5}
+                              sx={{
+                                color: scoreColor(screenerScore.result.score),
+                                "& .MuiCircularProgress-circle": { strokeLinecap: "round" },
+                              }}
+                            />
+                            <Box
+                              sx={{
+                                position: "absolute",
+                                inset: 0,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                            >
+                              <Typography
+                                sx={{
+                                  fontFamily: "var(--font-mono)",
+                                  fontWeight: 700,
+                                  fontSize: 24,
+                                  color: scoreColor(screenerScore.result.score),
+                                }}
+                              >
+                                {screenerScore.result.score}
+                              </Typography>
+                            </Box>
+                          </Box>
+                          <Typography sx={{ color: "#94A3B8", fontSize: 13 }}>out of 100</Typography>
+                        </>
+                      ) : null}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </>
+        )}
+
+        {/* ── Tab 2: Balance Sheet ──────────────────────────── */}
+        {tab === 2 && (
+          <Card>
+            <CardContent sx={{ p: 0 }}>
+              {bsLoading ? (
+                <Stack spacing={1} sx={{ p: 3 }}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} variant="rounded" height={40} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+                  ))}
+                </Stack>
+              ) : bsError ? (
+                <Alert severity="error" sx={{ m: 2 }}>{bsError}</Alert>
+              ) : (
+                <TableContainer>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        {["Year", "Total Equity", "Total Assets", "Share Capital", "Reserves & Surplus"].map((h) => (
+                          <TableCell key={h} sx={{ ...tableCellSx, color: "#94A3B8", fontWeight: 600 }}>
+                            {h}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {bsData.map((row) => (
+                        <TableRow key={row.year} sx={{ "&:hover": { bgcolor: "rgba(124,58,237,0.06)" } }}>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{row.year}</TableCell>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{formatNum(row.total_equity)}</TableCell>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{formatNum(row.total_assets)}</TableCell>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{formatNum(row.share_capital)}</TableCell>
+                          <TableCell sx={{ ...tableCellSx, ...monoSx }}>{formatNum(row.reserves_and_surplus)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── Tab 3: Cash Flow Chart ────────────────────────── */}
+        {tab === 3 && (
+          <Card>
+            <CardContent sx={{ p: 3 }}>
+              {cfLoading ? (
+                <Skeleton variant="rounded" height={400} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+              ) : cfError ? (
+                <Alert severity="error">{cfError}</Alert>
+              ) : (
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={cfData}>
+                    <CartesianGrid stroke="rgba(124,58,237,0.12)" vertical={false} />
+                    <XAxis
+                      dataKey="year"
+                      stroke="#94A3B8"
+                      tick={{ fontSize: 12, fontFamily: "var(--font-mono)" }}
+                    />
+                    <YAxis
+                      stroke="#94A3B8"
+                      tick={{ fontSize: 11, fontFamily: "var(--font-mono)" }}
+                      tickFormatter={(v) => `${(v / 1e7).toFixed(0)}Cr`}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: "rgba(5,1,15,0.95)",
+                        border: "1px solid rgba(124,58,237,0.3)",
+                        borderRadius: 12,
+                        fontFamily: "var(--font-mono)",
+                      }}
+                      formatter={(v: number, name: string) => [formatNum(v), name]}
+                    />
+                    <Legend />
+                    <Bar
+                      dataKey="cash_flow_from_operating_activities"
+                      name="Operating"
+                      fill="#7C3AED"
+                      radius={[6, 6, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="cash_flow_from_investing_activities"
+                      name="Investing"
+                      fill="#F4B942"
+                      radius={[6, 6, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="cash_flow_from_financing_activities"
+                      name="Financing"
+                      fill="#EF4444"
+                      radius={[6, 6, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </Box>
     </ProtectedRoute>
   );
 }
-

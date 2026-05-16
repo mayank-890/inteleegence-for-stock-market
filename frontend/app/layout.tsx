@@ -1,26 +1,31 @@
-import type { Metadata } from "next";
-import { ReactNode } from "react";
+"use client";
 
-import Providers from "@/components/Providers";
+import { ThemeProvider } from "@mui/material/styles";
+import CssBaseline from "@mui/material/CssBaseline";
+import theme from "@/theme";
+import { Inter, Roboto_Mono } from "next/font/google";
 
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: "B100 Intelligence",
-  description: "Financial intelligence platform for Nifty 100 companies."
-};
+const inter = Inter({ subsets: ["latin"] });
+const robotoMono = Roboto_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+});
 
-type RootLayoutProps = {
-  children: ReactNode;
-};
-
-export default function RootLayout({ children }: RootLayoutProps) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      <body>
-        <Providers>{children}</Providers>
+      <body className={`${inter.className} ${robotoMono.variable}`}>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
 }
-

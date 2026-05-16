@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { AxiosResponse } from "axios";
 
 import { clearSession, getApiKey, getToken } from "@/lib/auth";
 
@@ -37,7 +37,7 @@ export type ProfitLossRecord = {
   total_income: number | null;
   profit_before_tax: number | null;
   profit_after_tax: number | null;
-  eps: number | null;
+  basic_eps: number | null;
 };
 
 export type BalanceSheetRecord = {
@@ -249,7 +249,7 @@ export const fetchAllPaginated = async <T>(
   let pageCount = 0;
 
   while (nextUrl && pageCount < maxPages) {
-    const response =
+    const response: AxiosResponse<PaginatedEnvelope<T>> =
       nextUrl === endpoint
         ? await api.get<PaginatedEnvelope<T>>(endpoint, { params: currentParams })
         : await api.get<PaginatedEnvelope<T>>(nextUrl);

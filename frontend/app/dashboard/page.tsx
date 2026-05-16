@@ -1,294 +1,405 @@
 "use client";
 
-import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
-import AutoGraphRoundedIcon from "@mui/icons-material/AutoGraphRounded";
-import CorporateFareRoundedIcon from "@mui/icons-material/CorporateFareRounded";
-import CurrencyRupeeRoundedIcon from "@mui/icons-material/CurrencyRupeeRounded";
-import PercentRoundedIcon from "@mui/icons-material/PercentRounded";
-import QueryStatsRoundedIcon from "@mui/icons-material/QueryStatsRounded";
+import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
+import FilterListRoundedIcon from "@mui/icons-material/FilterListRounded";
+import KeyRoundedIcon from "@mui/icons-material/KeyRounded";
+import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
+import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
+import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
+import ShowChartRoundedIcon from "@mui/icons-material/ShowChartRounded";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import ScoreboardRoundedIcon from "@mui/icons-material/ScoreboardRounded";
 import {
-  Alert,
-  Box,
-  Button,
-  Container,
-  Grid,
-  Stack,
-  Typography
+  Alert, Autocomplete, Avatar, Box, Chip, CircularProgress,
+  Grid, List, ListItemButton, ListItemIcon, ListItemText,
+  Skeleton, Stack, TextField, Typography,
 } from "@mui/material";
-import NextLink from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import {
+  CartesianGrid, Line, LineChart, ResponsiveContainer,
+  Tooltip, XAxis, YAxis,
+} from "recharts";
 
-import CompanyChart from "@/components/CompanyChart";
-import ErrorState from "@/components/ErrorState";
-import LoadingBlock from "@/components/LoadingBlock";
-import MetricCard from "@/components/MetricCard";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import Sidebar from "@/components/Sidebar";
-import TopBar from "@/components/TopBar";
-import { CompanyListItem, ProfitLossRecord, fetchAllProfitLoss, fetchCompanies, fetchProfitLoss } from "@/lib/api";
+import GlassCard from "@/components/GlassCard";
+import {
+  ProfitLossRecord, RevenueTrendResponse, ProfitMarginResponse,
+  EPSGrowthResponse, AnomaliesResponse, ScreenerScoreResponse,
+  fetchProfitLoss, fetchRevenueTrend, fetchProfitMargin,
+  fetchEpsGrowth, fetchAnomalies, fetchScreenerScore, fetchUsageStats,
+} from "@/lib/api";
 import { clearSession, getStoredUser } from "@/lib/auth";
 
-const formatNumber = (value: number | null | undefined) =>
-  value == null || Number.isNaN(value) ? "N/A" : value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+/* ── Constants ──────────────────────────────────────────────── */
+
+const SYMBOLS = [
+  "RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK",
+  "WIPRO","BAJFINANCE","AXISBANK","SBIN","LT",
+  "MARUTI","TATAMOTORS","ASIANPAINT","SUNPHARMA","TITAN",
+  "ULTRACEMCO","NESTLEIND","POWERGRID","NTPC","COALINDIA",
+];
+
+const navItems = [
+  { label: "Dashboard", icon: <GridViewRoundedIcon />, href: "/dashboard" },
+  { label: "Screener", icon: <FilterListRoundedIcon />, href: "/screener" },
+  { label: "API Keys", icon: <KeyRoundedIcon />, href: "/api-keys" },
+  { label: "Pricing", icon: <PaymentsRoundedIcon />, href: "/pricing" },
+];
+
+const SIDEBAR_WIDTH = 240;
+
+const tooltipStyle = {
+  background: "rgba(5,1,15,0.95)",
+  border: "1px solid rgba(124,58,237,0.3)",
+  borderRadius: 12,
+  fontFamily: "var(--font-mono)",
+};
+
+/* ── Component ──────────────────────────────────────────────── */
 
 export default function DashboardPage() {
-  const [companies, setCompanies] = useState<CompanyListItem[]>([]);
-  const [selectedSymbol, setSelectedSymbol] = useState<string>("");
-  const [search, setSearch] = useState("");
-  const [selectedProfitLoss, setSelectedProfitLoss] = useState<ProfitLossRecord[]>([]);
-  const [allProfitLoss, setAllProfitLoss] = useState<ProfitLossRecord[]>([]);
-  const [loadingCompanies, setLoadingCompanies] = useState(true);
-  const [loadingCharts, setLoadingCharts] = useState(true);
-  const [loadingMetrics, setLoadingMetrics] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [chartsError, setChartsError] = useState<string | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
   const user = getStoredUser();
 
-  const filteredCompanies = useMemo(() => {
-    if (!search) {
-      return companies;
-    }
-    const lower = search.toLowerCase();
-    return companies.filter(
-      (company) =>
-        company.company_name.toLowerCase().includes(lower) ||
-        company.ticker_symbol.toLowerCase().includes(lower)
-    );
-  }, [companies, search]);
+  const [selectedSymbol, setSelectedSymbol] = useState("RELIANCE");
 
-  const metrics = useMemo(() => {
-    if (!allProfitLoss.length) {
-      return {
-        latestYear: null as number | null,
-        averageRevenueGrowth: null as number | null,
-        averageProfitMargin: null as number | null
-      };
-    }
+  const [plData, setPlData] = useState<ProfitLossRecord[]>([]);
+  const [plLoading, setPlLoading] = useState(true);
+  const [plError, setPlError] = useState<string | null>(null);
 
-    const groups = new Map<string, ProfitLossRecord[]>();
-    allProfitLoss.forEach((record) => {
-      const symbol = record.company_symbol || "UNKNOWN";
-      const current = groups.get(symbol) || [];
-      current.push(record);
-      groups.set(symbol, current);
-    });
+  const [revenueTrend, setRevenueTrend] = useState<RevenueTrendResponse | null>(null);
+  const [profitMargin, setProfitMargin] = useState<ProfitMarginResponse | null>(null);
+  const [epsGrowth, setEpsGrowth] = useState<EPSGrowthResponse | null>(null);
+  const [anomalies, setAnomalies] = useState<AnomaliesResponse | null>(null);
+  const [screenerScore, setScreenerScore] = useState<ScreenerScoreResponse | null>(null);
+  const [mlLoading, setMlLoading] = useState(true);
+  const [mlError, setMlError] = useState<string | null>(null);
 
-    const growthValues: number[] = [];
-    const latestMargins: number[] = [];
-    let latestYear = 0;
+  const [apiCalls, setApiCalls] = useState<number | null>(null);
 
-    groups.forEach((records) => {
-      const sorted = [...records].sort((left, right) => left.year - right.year);
-      sorted.forEach((row) => {
-        latestYear = Math.max(latestYear, row.year);
-      });
+  const loadData = useCallback(async (symbol: string) => {
+    setPlLoading(true); setPlError(null);
+    setMlLoading(true); setMlError(null);
+    try {
+      const result = await fetchProfitLoss({ company: symbol });
+      setPlData(result.items.sort((a, b) => a.year - b.year));
+    } catch { setPlError("Failed to load financial data."); }
+    finally { setPlLoading(false); }
 
-      const first = sorted[0];
-      const last = sorted[sorted.length - 1];
-
-      if (first?.revenue && last?.revenue && first.revenue !== 0 && sorted.length > 1) {
-        const growth = ((last.revenue - first.revenue) / Math.abs(first.revenue)) * 100;
-        growthValues.push(growth);
-      }
-
-      if (last?.revenue && last?.profit_after_tax && last.revenue !== 0) {
-        latestMargins.push((last.profit_after_tax / last.revenue) * 100);
-      }
-    });
-
-    return {
-      latestYear: latestYear || null,
-      averageRevenueGrowth:
-        growthValues.length > 0 ? growthValues.reduce((sum, value) => sum + value, 0) / growthValues.length : null,
-      averageProfitMargin:
-        latestMargins.length > 0 ? latestMargins.reduce((sum, value) => sum + value, 0) / latestMargins.length : null
-    };
-  }, [allProfitLoss]);
-
-  const chartData = useMemo(
-    () => [...selectedProfitLoss].sort((left, right) => left.year - right.year),
-    [selectedProfitLoss]
-  );
-
-  useEffect(() => {
-    const loadDashboard = async () => {
-      try {
-        setLoadingCompanies(true);
-        setLoadingMetrics(true);
-        setError(null);
-
-        const [companyResponse, profitLossResponse] = await Promise.all([
-          fetchCompanies({ page_size: 100 }),
-          fetchAllProfitLoss()
-        ]);
-
-        setCompanies(companyResponse.items);
-        setAllProfitLoss(profitLossResponse);
-        if (companyResponse.items[0]) {
-          setSelectedSymbol((previous) => previous || companyResponse.items[0].ticker_symbol);
-        }
-      } catch {
-        setError("Dashboard data could not be loaded. Please try again.");
-      } finally {
-        setLoadingCompanies(false);
-        setLoadingMetrics(false);
-      }
-    };
-
-    loadDashboard();
+    try {
+      const [rt, pm, eg, an, ss] = await Promise.all([
+        fetchRevenueTrend(symbol), fetchProfitMargin(symbol),
+        fetchEpsGrowth(symbol), fetchAnomalies(symbol), fetchScreenerScore(symbol),
+      ]);
+      setRevenueTrend(rt); setProfitMargin(pm);
+      setEpsGrowth(eg); setAnomalies(an); setScreenerScore(ss);
+    } catch { setMlError("Failed to load ML insights."); }
+    finally { setMlLoading(false); }
   }, []);
 
+  useEffect(() => { loadData(selectedSymbol); }, [selectedSymbol, loadData]);
+
   useEffect(() => {
-    if (!selectedSymbol) {
-      return;
-    }
+    fetchUsageStats()
+      .then((usage) => { const total = usage.reduce((s, u) => s + u.request_count, 0); setApiCalls(total); })
+      .catch(() => setApiCalls(null));
+  }, []);
 
-    const loadCompanyTrend = async () => {
-      try {
-        setLoadingCharts(true);
-        setChartsError(null);
-        const response = await fetchProfitLoss({ company: selectedSymbol });
-        setSelectedProfitLoss(response.items);
-      } catch {
-        setChartsError("We couldn't load the selected company's financial trend.");
-      } finally {
-        setLoadingCharts(false);
-      }
-    };
+  const handleLogout = () => { clearSession(); router.push("/login"); };
 
-    loadCompanyTrend();
-  }, [selectedSymbol]);
+  const scoreColor = (score: number) => {
+    if (score >= 71) return "#22C55E";
+    if (score >= 41) return "#F4B942";
+    return "#EF4444";
+  };
+
+  const directionChip = (dir: string) => {
+    if (dir === "growing" || dir === "improving")
+      return <Chip label={dir} size="small" sx={{ bgcolor: "rgba(34,197,94,0.15)", color: "#22C55E", fontWeight: 600 }} />;
+    if (dir === "declining" || dir === "deteriorating")
+      return <Chip label={dir} size="small" sx={{ bgcolor: "rgba(239,68,68,0.15)", color: "#EF4444", fontWeight: 600 }} />;
+    return <Chip label={dir} size="small" sx={{ bgcolor: "rgba(148,163,184,0.15)", color: "#94A3B8", fontWeight: 600 }} />;
+  };
+
+  const formatNum = (n: number | null | undefined) => {
+    if (n == null) return "—";
+    if (Math.abs(n) >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
+    if (Math.abs(n) >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;
+    return n.toLocaleString("en-IN");
+  };
 
   return (
     <ProtectedRoute>
-      <Box sx={{ p: 2 }}>
-        <Box sx={{ display: { xs: "block", md: "flex" }, gap: 2 }}>
-          <Sidebar
-            companies={filteredCompanies}
-            selectedSymbol={selectedSymbol}
-            search={search}
-            onSearchChange={setSearch}
-            onSelect={setSelectedSymbol}
+      <Box sx={{ display: "flex", minHeight: "100vh" }}>
+        {/* ── Sidebar ───────────────────────────────── */}
+        <Box
+          sx={{
+            width: SIDEBAR_WIDTH, flexShrink: 0,
+            background: "rgba(5,1,15,0.7)", backdropFilter: "blur(20px)",
+            borderRight: "1px solid rgba(124,58,237,0.15)",
+            position: "fixed", top: 0, left: 0, bottom: 0,
+            display: "flex", flexDirection: "column", py: 3, px: 2,
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 4, px: 1, cursor: "pointer" }} onClick={() => router.push("/")}>
+            <Box sx={{ width: 8, height: 8, borderRadius: "50%", background: "#7C3AED" }} />
+            <Typography sx={{ fontWeight: 800, fontSize: 18 }} className="gradient-text-purple">B100</Typography>
+            <Typography sx={{ color: "#94A3B8", fontSize: 13 }}>Intelligence</Typography>
+          </Stack>
+
+          <List sx={{ flex: 1 }}>
+            {navItems.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <ListItemButton
+                  key={item.label} onClick={() => router.push(item.href)}
+                  sx={{
+                    borderRadius: 2, mb: 0.5,
+                    bgcolor: active ? "rgba(124,58,237,0.15)" : "transparent",
+                    color: active ? "#F8FAFC" : "#94A3B8",
+                    "&:hover": { bgcolor: "rgba(124,58,237,0.1)", color: "#F8FAFC" },
+                  }}
+                >
+                  <ListItemIcon sx={{ color: active ? "#7C3AED" : "#94A3B8", minWidth: 40 }}>{item.icon}</ListItemIcon>
+                  <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 14, fontWeight: active ? 600 : 400 }} />
+                </ListItemButton>
+              );
+            })}
+          </List>
+
+          <Stack spacing={1.5} sx={{ px: 1 }}>
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Avatar sx={{ width: 32, height: 32, bgcolor: "#7C3AED", fontSize: 14 }}>
+                {(user?.name || user?.email || "U").charAt(0).toUpperCase()}
+              </Avatar>
+              <Typography sx={{ fontSize: 13, color: "#94A3B8" }} noWrap>{user?.email || "User"}</Typography>
+            </Stack>
+            <ListItemButton onClick={handleLogout} sx={{ borderRadius: 2, color: "#EF4444", "&:hover": { bgcolor: "rgba(239,68,68,0.08)" } }}>
+              <ListItemIcon sx={{ color: "#EF4444", minWidth: 40 }}><LogoutRoundedIcon /></ListItemIcon>
+              <ListItemText primary="Logout" primaryTypographyProps={{ fontSize: 14, fontWeight: 500 }} />
+            </ListItemButton>
+          </Stack>
+        </Box>
+
+        {/* ── Main Content ──────────────────────────── */}
+        <Box sx={{ ml: `${SIDEBAR_WIDTH}px`, flex: 1, p: { xs: 2, md: 4 }, maxWidth: 1200 }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4 }}>
+            <Typography variant="h4" sx={{ fontWeight: 700 }}>Dashboard</Typography>
+            <Typography sx={{ color: "#94A3B8", fontSize: 14 }}>{user?.email || ""}</Typography>
+          </Stack>
+
+          {/* KPI Cards */}
+          <Grid container spacing={2.5} sx={{ mb: 4 }}>
+            {[
+              { label: "Companies Tracked", value: "92" },
+              { label: "Data Range", value: "2011–2024" },
+              { label: "ML Models Active", value: "5" },
+              { label: "API Calls", value: apiCalls != null ? apiCalls.toLocaleString() : "—" },
+            ].map((kpi) => (
+              <Grid item xs={12} sm={6} md={3} key={kpi.label}>
+                <GlassCard sx={{ p: 2.5 }}>
+                  <Typography sx={{ color: "#94A3B8", fontSize: 13, fontWeight: 400, mb: 1 }}>{kpi.label}</Typography>
+                  <Typography sx={{ fontFamily: "var(--font-mono)", fontSize: 28, fontWeight: 700 }} className="gradient-text-purple">{kpi.value}</Typography>
+                </GlassCard>
+              </Grid>
+            ))}
+          </Grid>
+
+          {/* Company Selector */}
+          <Autocomplete
+            options={SYMBOLS} value={selectedSymbol}
+            onChange={(_, v) => v && setSelectedSymbol(v)}
+            renderInput={(params) => (
+              <TextField {...params} label="Select Company" sx={{
+                maxWidth: 320, mb: 3,
+                "& .MuiOutlinedInput-root": {
+                  "& fieldset": { borderColor: "rgba(124,58,237,0.2)" },
+                  "&:hover fieldset": { borderColor: "rgba(168,85,247,0.4)" },
+                  "&.Mui-focused fieldset": { borderColor: "#7C3AED" },
+                },
+              }} />
+            )}
           />
 
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <TopBar
-              title="Executive Dashboard"
-              subtitle="A working surface for scanning market leaders, tracking trend shifts, and drilling into fundamentals."
-              userLabel={user?.email}
-              onLogout={() => {
-                clearSession();
-                window.location.href = "/login";
-              }}
-              actions={
-                selectedSymbol ? (
-                  <Button
-                    component={NextLink}
-                    href={`/company/${selectedSymbol}`}
-                    variant="outlined"
-                    endIcon={<ArrowForwardRoundedIcon />}
-                  >
-                    Open company
-                  </Button>
-                ) : null
-              }
-            />
+          {/* Charts Row */}
+          {plError && <Alert severity="error" sx={{ mb: 3 }}>{plError}</Alert>}
+          <Grid container spacing={2.5} sx={{ mb: 4 }}>
+            <Grid item xs={12} md={6}>
+              <GlassCard sx={{ height: 360, p: 2.5 }}>
+                <Typography variant="h6" sx={{ mb: 2 }}>Revenue Trend</Typography>
+                {plLoading ? (
+                  <Skeleton variant="rounded" height={260} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={plData}>
+                      <CartesianGrid stroke="rgba(124,58,237,0.12)" vertical={false} />
+                      <XAxis dataKey="year" stroke="#94A3B8" tick={{ fontSize: 12, fontFamily: "var(--font-mono)" }} />
+                      <YAxis stroke="#94A3B8" tick={{ fontSize: 11, fontFamily: "var(--font-mono)" }} tickFormatter={(v) => `${(v / 1e7).toFixed(0)}Cr`} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [formatNum(v), "Revenue"]} />
+                      <Line type="monotone" dataKey="revenue" stroke="#7C3AED" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </GlassCard>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <GlassCard sx={{ height: 360, p: 2.5 }}>
+                <Typography variant="h6" sx={{ mb: 2 }}>Profit After Tax</Typography>
+                {plLoading ? (
+                  <Skeleton variant="rounded" height={260} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} />
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={plData}>
+                      <CartesianGrid stroke="rgba(124,58,237,0.12)" vertical={false} />
+                      <XAxis dataKey="year" stroke="#94A3B8" tick={{ fontSize: 12, fontFamily: "var(--font-mono)" }} />
+                      <YAxis stroke="#94A3B8" tick={{ fontSize: 11, fontFamily: "var(--font-mono)" }} tickFormatter={(v) => `${(v / 1e7).toFixed(0)}Cr`} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [formatNum(v), "PAT"]} />
+                      <Line type="monotone" dataKey="profit_after_tax" stroke="#22C55E" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </GlassCard>
+            </Grid>
+          </Grid>
 
-            <Container maxWidth={false} disableGutters>
-              {error ? <Alert severity="error">{error}</Alert> : null}
+          {/* ML Insights Row */}
+          <Typography variant="h5" sx={{ fontWeight: 700, mb: 2.5 }}>ML Insights — {selectedSymbol}</Typography>
+          {mlError && <Alert severity="error" sx={{ mb: 3 }}>{mlError}</Alert>}
+          <Grid container spacing={2.5}>
+            {/* Revenue Trend */}
+            <Grid item xs={12} sm={6} md={4}>
+              <GlassCard sx={{ height: "100%", p: 2.5 }}>
+                <Stack spacing={2}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <TrendingUpRoundedIcon sx={{ color: "#7C3AED" }} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Revenue Trend</Typography>
+                  </Stack>
+                  {mlLoading ? <Skeleton variant="rounded" height={80} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} /> : revenueTrend ? (
+                    <Stack spacing={1}>
+                      {directionChip(revenueTrend.result.direction)}
+                      <Stack direction="row" spacing={2}>
+                        <Box>
+                          <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>Slope</Typography>
+                          <Typography sx={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>{revenueTrend.result.slope.toFixed(4)}</Typography>
+                        </Box>
+                        <Box>
+                          <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>R² Score</Typography>
+                          <Typography sx={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>{revenueTrend.result.r2_score.toFixed(4)}</Typography>
+                        </Box>
+                      </Stack>
+                    </Stack>
+                  ) : null}
+                </Stack>
+              </GlassCard>
+            </Grid>
 
-              <Grid container spacing={2.5} sx={{ mb: 3 }}>
-                <Grid item xs={12} sm={6} xl={3}>
-                  <MetricCard
-                    title="Companies tracked"
-                    value={loadingCompanies ? "" : String(companies.length)}
-                    subtitle="Current Nifty 100 coverage in the platform"
-                    icon={<CorporateFareRoundedIcon color="primary" />}
-                    loading={loadingCompanies}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6} xl={3}>
-                  <MetricCard
-                    title="Latest year available"
-                    value={loadingMetrics ? "" : String(metrics.latestYear ?? "N/A")}
-                    subtitle="Most recent fiscal year present in warehouse facts"
-                    icon={<QueryStatsRoundedIcon color="primary" />}
-                    loading={loadingMetrics}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6} xl={3}>
-                  <MetricCard
-                    title="Average revenue growth"
-                    value={loadingMetrics ? "" : `${formatNumber(metrics.averageRevenueGrowth)}%`}
-                    subtitle="Mean first-to-last revenue growth across companies"
-                    icon={<AutoGraphRoundedIcon color="primary" />}
-                    loading={loadingMetrics}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6} xl={3}>
-                  <MetricCard
-                    title="Average profit margin"
-                    value={loadingMetrics ? "" : `${formatNumber(metrics.averageProfitMargin)}%`}
-                    subtitle="Latest profit margin snapshot across the tracked universe"
-                    icon={<PercentRoundedIcon color="primary" />}
-                    loading={loadingMetrics}
-                  />
-                </Grid>
-              </Grid>
+            {/* Profit Margin */}
+            <Grid item xs={12} sm={6} md={4}>
+              <GlassCard sx={{ height: "100%", p: 2.5 }}>
+                <Stack spacing={2}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <ShowChartRoundedIcon sx={{ color: "#7C3AED" }} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Profit Margin</Typography>
+                  </Stack>
+                  {mlLoading ? <Skeleton variant="rounded" height={80} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} /> : profitMargin ? (
+                    <Stack spacing={1}>
+                      <Typography sx={{ fontFamily: "var(--font-mono)", fontSize: 28, fontWeight: 700, color: "#F8FAFC" }}>
+                        {profitMargin.result.average_margin_pct != null ? `${profitMargin.result.average_margin_pct.toFixed(2)}%` : "—"}
+                      </Typography>
+                      {directionChip(profitMargin.result.overall_trend)}
+                    </Stack>
+                  ) : null}
+                </Stack>
+              </GlassCard>
+            </Grid>
 
-              {loadingCharts ? (
-                <Grid container spacing={2.5}>
-                  <Grid item xs={12} lg={8}>
-                    <LoadingBlock height={360} />
-                  </Grid>
-                  <Grid item xs={12} lg={4}>
-                    <LoadingBlock height={360} />
-                  </Grid>
-                </Grid>
-              ) : chartsError ? (
-                <ErrorState message={chartsError} />
-              ) : (
-                <Grid container spacing={2.5}>
-                  <Grid item xs={12} xl={8}>
-                    <CompanyChart
-                      title={`Revenue trend • ${selectedSymbol}`}
-                      data={chartData}
-                      xKey="year"
-                      type="line"
-                      series={[{ key: "revenue", label: "Revenue", color: "#F4B942" }]}
-                    />
-                  </Grid>
-                  <Grid item xs={12} xl={4}>
-                    <CompanyChart
-                      title="Profit after tax"
-                      data={chartData}
-                      xKey="year"
-                      type="line"
-                      series={[{ key: "profit_after_tax", label: "PAT", color: "#3AAED8" }]}
-                    />
-                  </Grid>
-                  <Grid item xs={12}>
-                    <CompanyChart
-                      title="EPS by year"
-                      data={chartData.map((entry) => ({ ...entry, eps_value: entry.eps }))}
-                      xKey="year"
-                      type="bar"
-                      series={[{ key: "eps_value", label: "EPS", color: "#7BE495" }]}
-                    />
-                  </Grid>
-                </Grid>
-              )}
+            {/* EPS Growth */}
+            <Grid item xs={12} sm={6} md={4}>
+              <GlassCard sx={{ height: "100%", p: 2.5 }}>
+                <Stack spacing={2}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <TrendingUpRoundedIcon sx={{ color: "#7C3AED" }} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>EPS Growth</Typography>
+                  </Stack>
+                  {mlLoading ? <Skeleton variant="rounded" height={80} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} /> : epsGrowth ? (
+                    <Stack spacing={1}>
+                      <Stack direction="row" spacing={2}>
+                        <Box>
+                          <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>Best Year</Typography>
+                          <Typography sx={{ fontFamily: "var(--font-mono)", fontWeight: 700, color: "#22C55E" }}>
+                            {epsGrowth.result.best_year.year}{" "}({epsGrowth.result.best_year.growth_pct != null ? `${epsGrowth.result.best_year.growth_pct.toFixed(1)}%` : "—"})
+                          </Typography>
+                        </Box>
+                        <Box>
+                          <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>Worst Year</Typography>
+                          <Typography sx={{ fontFamily: "var(--font-mono)", fontWeight: 700, color: "#EF4444" }}>
+                            {epsGrowth.result.worst_year.year}{" "}({epsGrowth.result.worst_year.growth_pct != null ? `${epsGrowth.result.worst_year.growth_pct.toFixed(1)}%` : "—"})
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    </Stack>
+                  ) : null}
+                </Stack>
+              </GlassCard>
+            </Grid>
 
-              {!selectedSymbol && !loadingCompanies ? (
-                <Typography color="text.secondary" sx={{ mt: 3 }}>
-                  Select a company from the sidebar to load charts.
-                </Typography>
-              ) : null}
-            </Container>
-          </Box>
+            {/* Anomalies */}
+            <Grid item xs={12} sm={6} md={4}>
+              <GlassCard sx={{ height: "100%", p: 2.5 }}>
+                <Stack spacing={2}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <WarningAmberRoundedIcon sx={{ color: "#F4B942" }} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Anomalies</Typography>
+                  </Stack>
+                  {mlLoading ? <Skeleton variant="rounded" height={80} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} /> : anomalies ? (
+                    <Stack spacing={1}>
+                      <Typography sx={{ fontFamily: "var(--font-mono)", fontSize: 28, fontWeight: 700, color: anomalies.result.anomaly_count > 0 ? "#EF4444" : "#22C55E" }}>
+                        {anomalies.result.anomaly_count}
+                      </Typography>
+                      <Typography sx={{ color: "#94A3B8", fontSize: 13 }}>anomalous years detected</Typography>
+                      {anomalies.result.metrics.revenue.length > 0 && (
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                          {anomalies.result.metrics.revenue.map((a) => (
+                            <Chip key={a.year} label={a.year} size="small" sx={{ bgcolor: "rgba(239,68,68,0.12)", color: "#EF4444", fontFamily: "var(--font-mono)", fontSize: 12, mb: 0.5 }} />
+                          ))}
+                        </Stack>
+                      )}
+                    </Stack>
+                  ) : null}
+                </Stack>
+              </GlassCard>
+            </Grid>
+
+            {/* Screener Score */}
+            <Grid item xs={12} sm={6} md={4}>
+              <GlassCard sx={{ height: "100%", p: 2.5 }}>
+                <Stack spacing={2}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <ScoreboardRoundedIcon sx={{ color: "#7C3AED" }} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Screener Score</Typography>
+                  </Stack>
+                  {mlLoading ? <Skeleton variant="circular" width={80} height={80} sx={{ bgcolor: "rgba(124,58,237,0.08)" }} /> : screenerScore ? (
+                    <Stack alignItems="center" spacing={1}>
+                      <Box sx={{ position: "relative", display: "inline-flex" }}>
+                        <CircularProgress variant="determinate" value={screenerScore.result.score} size={80} thickness={5}
+                          sx={{ color: scoreColor(screenerScore.result.score), "& .MuiCircularProgress-circle": { strokeLinecap: "round" } }} />
+                        <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Typography sx={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 20, color: scoreColor(screenerScore.result.score) }}>
+                            {screenerScore.result.score}
+                          </Typography>
+                        </Box>
+                      </Box>
+                      <Typography sx={{ color: "#94A3B8", fontSize: 12 }}>out of 100</Typography>
+                    </Stack>
+                  ) : null}
+                </Stack>
+              </GlassCard>
+            </Grid>
+          </Grid>
         </Box>
       </Box>
     </ProtectedRoute>
   );
 }
-
